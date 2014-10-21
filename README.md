@@ -49,6 +49,8 @@ class SatisfyOrderWorker
 end
 ```
 
+### Dynamic
+
 For workers on the same queue, the `priority` option can take a `Proc` which will be given the arguments the job was queued with. As an example:
 
 ```ruby
