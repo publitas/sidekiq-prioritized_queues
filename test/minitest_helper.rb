@@ -16,3 +16,11 @@ class MockWorker
   def perform(arg)
   end
 end
+
+class MockWorkerFixedPrio
+  include Sidekiq::Worker
+  sidekiq_options priority: 2
+
+  def perform(arg)
+  end
+end

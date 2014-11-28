@@ -12,6 +12,7 @@ module Sidekiq
         msg['priority'] = case priority
         when Proc   then priority.call(*msg['args'])
         when String then priority.to_i
+        when Fixnum then priority
         else Time.now.to_f
         end
 
