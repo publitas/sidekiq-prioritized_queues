@@ -2,25 +2,68 @@ require 'sidekiq/api'
 
 module Sidekiq
   class Stats
-    def queues
-      Sidekiq.redis do |conn|
-        queues = conn.smembers('queues')
 
-        lengths = conn.pipelined do
-          queues.each do |queue|
-            conn.zcard("queue:#{queue}")
-          end
+    def fetch_stats!
+      pipe1_res = Sidekiq.redis do |conn|
+        conn.pipelined do
+          conn.get('stat:processed'.freeze)
+          conn.get('stat:failed'.freeze)
+          conn.zcard('schedule'.freeze)
+          conn.zcard('retry'.freeze)
+          conn.zcard('dead'.freeze)
+          conn.scard('processes'.freeze)
+          conn.zrange('queue:default'.freeze, -1, -1)
+          conn.smembers('processes'.freeze)
+          conn.smembers('queues'.freeze)
         end
-
-        i = 0
-        array_of_arrays = queues.inject({}) do |memo, queue|
-          memo[queue] = lengths[i]
-          i += 1
-          memo
-        end.sort_by { |_, size| size }
-
-        Hash[array_of_arrays.reverse]
       end
+      pipe2_res = Sidekiq.redis do |conn|
+        conn.pipelined do
+          pipe1_res[7].each {|key| conn.hget(key, 'busy'.freeze) }
+          pipe1_res[8].each {|queue| conn.zcard("queue:#{queue}") }
+        end
+      end
+      s = pipe1_res[7].size
+      workers_size = pipe2_res[0...s].map(&:to_i).inject(0, &:+)
+      enqueued     = pipe2_res[s..-1].map(&:to_i).inject(0, &:+)
+      default_queue_latency = if (entry = pipe1_res[6].first)
+                                Time.now.to_f - Sidekiq.load_json(entry)['enqueued_at'.freeze]
+                              else
+                                0
+                              end
+      @stats = {
+        processed:             pipe1_res[0].to_i,
+        failed:                pipe1_res[1].to_i,
+        scheduled_size:        pipe1_res[2],
+        retry_size:            pipe1_res[3],
+        dead_size:             pipe1_res[4],
+        processes_size:        pipe1_res[5],
+        default_queue_latency: default_queue_latency,
+        workers_size:          workers_size,
+        enqueued:              enqueued
+      }
+    end
+
+    class Queues
+
+      def lengths
+        Sidekiq.redis do |conn|
+          queues = conn.smembers('queues')
+          lengths = conn.pipelined do
+            queues.each do |queue|
+              conn.zcard("queue:#{queue}")
+            end
+          end
+          i = 0
+          array_of_arrays = queues.inject({}) do |memo, queue|
+            memo[queue] = lengths[i]
+            i += 1
+            memo
+          end.sort_by { |_, size| size }
+          Hash[array_of_arrays.reverse]
+        end
+      end
+
     end
   end
 
