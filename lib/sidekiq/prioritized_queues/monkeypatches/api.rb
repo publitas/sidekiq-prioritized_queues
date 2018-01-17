@@ -1,3 +1,4 @@
+# frozen_string_literal: true
 require 'sidekiq/api'
 
 module Sidekiq
@@ -17,17 +18,23 @@ module Sidekiq
           conn.smembers('queues'.freeze)
         end
       end
+
       pipe2_res = Sidekiq.redis do |conn|
         conn.pipelined do
           pipe1_res[7].each {|key| conn.hget(key, 'busy'.freeze) }
           pipe1_res[8].each {|queue| conn.zcard("queue:#{queue}") }
         end
       end
+
       s = pipe1_res[7].size
       workers_size = pipe2_res[0...s].map(&:to_i).inject(0, &:+)
       enqueued     = pipe2_res[s..-1].map(&:to_i).inject(0, &:+)
+
       default_queue_latency = if (entry = pipe1_res[6].first)
-                                Time.now.to_f - Sidekiq.load_json(entry)['enqueued_at'.freeze]
+                                job = Sidekiq.load_json(entry) rescue {}
+                                now = Time.now.to_f
+                                thence = job['enqueued_at'.freeze] || now
+                                now - thence
                               else
                                 0
                               end
@@ -38,6 +45,7 @@ module Sidekiq
         retry_size:            pipe1_res[3],
         dead_size:             pipe1_res[4],
         processes_size:        pipe1_res[5],
+
         default_queue_latency: default_queue_latency,
         workers_size:          workers_size,
         enqueued:              enqueued
@@ -45,10 +53,9 @@ module Sidekiq
     end
 
     class Queues
-
       def lengths
         Sidekiq.redis do |conn|
-          queues = conn.smembers('queues')
+          queues = conn.smembers('queues'.freeze)
           lengths = conn.pipelined do
             queues.each do |queue|
               conn.zcard("queue:#{queue}")
@@ -77,25 +84,28 @@ module Sidekiq
         conn.zrange(@rname, -1, -1)
       end.first
       return 0 unless entry
-      Time.now.to_f - Sidekiq.load_json(entry)['enqueued_at']
+      job = Sidekiq.load_json(entry)
+      now = Time.now.to_f
+      thence = job['enqueued_at'] || now
+      now - thence
     end
 
-    def each(&block)
+    def each
       initial_size = size
       deleted_size = 0
       page = 0
       page_size = 50
 
-      loop do
+      while true do
         range_start = page * page_size - deleted_size
-        range_end   = page * page_size - deleted_size + (page_size - 1)
+        range_end   = range_start + page_size - 1
         entries = Sidekiq.redis do |conn|
           conn.zrevrange @rname, range_start, range_end
         end
         break if entries.empty?
         page += 1
         entries.each do |entry|
-          block.call Job.new(entry, @name)
+          yield Job.new(entry, @name)
         end
         deleted_size = initial_size - size
       end
