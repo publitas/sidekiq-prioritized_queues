@@ -18,4 +18,4 @@ Sidekiq.configure_client do |config|
 end
 
 # Set up the fetcher as the priority based one too.
-Sidekiq.options[:fetch] = Sidekiq::PrioritizedQueues::Fetch
+Sidekiq.options[:fetch] = Sidekiq::PrioritizedQueues::Fetch.new(Sidekiq.options)
