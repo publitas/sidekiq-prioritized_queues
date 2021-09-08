@@ -6,7 +6,7 @@ module Sidekiq
     get '/queues/:name' do
       @name = route_params[:name]
 
-      halt(404) unless @name
+      halt(404) if !@name || @name !~ QUEUE_NAME
 
       @count = (params["count"] || 25).to_i
       @queue = Sidekiq::Queue.new(@name)

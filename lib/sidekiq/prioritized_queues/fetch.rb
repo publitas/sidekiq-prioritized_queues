@@ -22,9 +22,13 @@ module Sidekiq
       }
 
       def initialize(options)
+        raise ArgumentError, "missing queue list" unless options[:queues]
         @strictly_ordered_queues = !!options[:strict]
         @queues = options[:queues].map { |q| "queue:#{q}" }
-        @queues.uniq! if @strictly_ordered_queues
+        if @strictly_ordered_queues
+          @queues.uniq!
+          @queues << TIMEOUT
+        end
       end
 
       def retrieve_work
@@ -51,9 +55,7 @@ module Sidekiq
         @strictly_ordered_queues ? @queues.dup : @queues.shuffle.uniq
       end
 
-      # By leaving this as a class method, it can be pluggable and used by the Manager actor. Making it
-      # an instance method will make it async to the Fetcher actor
-      def self.bulk_requeue(inprogress, options)
+      def bulk_requeue(inprogress, options)
         return if inprogress.empty?
 
         Sidekiq.logger.debug { "Re-queueing terminated jobs" }

@@ -3,7 +3,7 @@
 module Sidekiq
   class Stats
 
-    def fetch_stats!
+    def fetch_stats_fast!
       pipe1_res = Sidekiq.redis do |conn|
         conn.pipelined do
           conn.get('stat:processed')
@@ -15,25 +15,6 @@ module Sidekiq
           conn.zrange('queue:default', -1, -1)
         end
       end
-
-      processes = Sidekiq.redis do |conn|
-        conn.sscan_each('processes').to_a
-      end
-
-      queues = Sidekiq.redis do |conn|
-        conn.sscan_each('queues').to_a
-      end
-
-      pipe2_res = Sidekiq.redis do |conn|
-        conn.pipelined do
-          processes.each { |key| conn.hget(key, 'busy') }
-          queues.each { |queue| conn.zcard("queue:#{queue}") }
-        end
-      end
-
-      s = processes.size
-      workers_size = pipe2_res[0...s].sum(&:to_i)
-      enqueued = pipe2_res[s..-1].sum(&:to_i)
 
       default_queue_latency = if (entry = pipe1_res[6].first)
         job = begin
@@ -56,9 +37,31 @@ module Sidekiq
         processes_size: pipe1_res[5],
 
         default_queue_latency: default_queue_latency,
-        workers_size: workers_size,
-        enqueued: enqueued,
       }
+    end
+
+    def fetch_stats_slow!
+      processes = Sidekiq.redis do |conn|
+        conn.sscan_each('processes').to_a
+      end
+
+      queues = Sidekiq.redis do |conn|
+        conn.sscan_each('queues').to_a
+      end
+
+      pipe2_res = Sidekiq.redis do |conn|
+        conn.pipelined do
+          processes.each { |key| conn.hget(key, 'busy') }
+          queues.each { |queue| conn.zcard("queue:#{queue}") }
+        end
+      end
+
+      s = processes.size
+      workers_size = pipe2_res[0...s].sum(&:to_i)
+      enqueued = pipe2_res[s..-1].sum(&:to_i)
+
+      @stats[:workers_size] = workers_size
+      @stats[:enqueued] = enqueued
     end
 
     class Queues
@@ -73,7 +76,7 @@ module Sidekiq
           }
 
           array_of_arrays = queues.zip(lengths).sort_by { |_, size| -size }
-          Hash[array_of_arrays]
+          array_of_arrays.to_h
         end
       end
     end
@@ -110,14 +113,23 @@ module Sidekiq
         break if entries.empty?
         page += 1
         entries.each do |entry|
-          yield Job.new(entry, @name)
+          yield JobRecord.new(entry, @name)
         end
         deleted_size = initial_size - size
       end
     end
+
+    def clear
+      Sidekiq.redis do |conn|
+        conn.multi do
+          conn.unlink(@rname)
+          conn.zrem("queues", name)
+        end
+      end
+    end
   end
 
-  class Job
+  class JobRecord
     def delete
       count = Sidekiq.redis do |conn|
         conn.zrem("queue:#{@queue}", @value)
