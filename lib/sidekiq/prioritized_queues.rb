@@ -9,6 +9,8 @@ Sidekiq.configure_server do |config|
   config.client_middleware do |chain|
     chain.add Sidekiq::PrioritizedQueues::Middleware
   end
+  # Set up the fetcher as the priority based one too.
+  config[:fetch] = Sidekiq::PrioritizedQueues::Fetch.new(Sidekiq.options)
 end
 
 Sidekiq.configure_client do |config|
@@ -16,6 +18,3 @@ Sidekiq.configure_client do |config|
     chain.add Sidekiq::PrioritizedQueues::Middleware
   end
 end
-
-# Set up the fetcher as the priority based one too.
-Sidekiq.options[:fetch] = Sidekiq::PrioritizedQueues::Fetch

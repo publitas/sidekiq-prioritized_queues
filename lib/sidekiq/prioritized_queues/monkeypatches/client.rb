@@ -5,19 +5,20 @@ module Sidekiq
   private
 
     def atomic_push(conn, payloads)
-      if payloads.first['at'.freeze]
-        conn.zadd('schedule'.freeze, payloads.map do |hash|
-          at = hash.delete('at'.freeze).to_s
+      if payloads.first.key?('at')
+        conn.zadd('schedule', payloads.map do |hash|
+          at = hash.delete('at').to_s
           [at, Sidekiq.dump_json(hash)]
         end)
       else
-        q = payloads.first['queue'.freeze]
+        queue = payloads.first['queue']
         now = Time.now.to_f
-        conn.sadd('queues'.freeze, q)
+        conn.sadd('queues', queue)
         payloads.each do |entry|
+          entry['enqueued_at'] = now
           to_push  = Sidekiq.dump_json(entry)
           priority = entry['priority'] || 0
-          conn.zadd("queue:#{q}", priority, to_push)
+          conn.zadd("queue:#{queue}", priority, to_push)
         end
       end
     end

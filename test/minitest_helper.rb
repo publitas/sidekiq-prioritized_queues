@@ -5,8 +5,7 @@ require 'sidekiq/prioritized_queues'
 require 'minitest/autorun'
 
 REDIS = Sidekiq::RedisConnection.create(
-  url:       'redis://localhost/15',
-  namespace: 'sidekiq_prioritized_queues_test'
+  url: 'redis://localhost/15',
 )
 
 class MockWorker
