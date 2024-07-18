@@ -66,9 +66,11 @@ module Sidekiq
         end
 
         Sidekiq.redis do |conn|
-          conn.pipelined do
+          conn.pipelined do |pipeline|
             jobs_to_requeue.each do |queue, jobs|
-              conn.zadd(queue, 0, jobs)
+              jobs.each do |job|
+                pipeline.zadd(queue, 0, job)
+              end
             end
           end
         end
