@@ -17,8 +17,13 @@ module Sidekiq
         payloads.each do |entry|
           entry['enqueued_at'] = now
           to_push  = Sidekiq.dump_json(entry)
-          priority = entry['priority'] || 0
-          conn.zadd("queue:#{queue}", priority, to_push)
+
+          if entry['priority'].is_a?(FalseClass)
+            conn.lpush("queue:#{queue}", to_push)
+          else
+            priority = entry['priority'] || 0
+            conn.zadd("queue:#{queue}", priority, to_push)
+          end
         end
       end
     end
