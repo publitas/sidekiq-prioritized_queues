@@ -15,7 +15,7 @@ module Sidekiq
         fetcher = Sidekiq::PrioritizedQueues::Fetch.new(queues: ['default'])
 
         [100, 200, 300].each do |priority|
-          msg = Sidekiq.load_json(fetcher.retrieve_work.message)
+          msg = Sidekiq.load_json(fetcher.retrieve_work.job)
           assert_equal priority, msg['priority']
         end
       end

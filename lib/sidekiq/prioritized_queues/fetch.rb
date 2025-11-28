@@ -38,12 +38,12 @@ module Sidekiq
 
         Sidekiq.redis do |conn|
           queues.each do |queue|
-            response = conn.multi do
+            response = conn.multi do |pipeline|
               if @ignored_queues.include?(queue)
-                conn.brpop(queue)
+                pipeline.brpop(queue)
               else
-                conn.zrange(queue, 0, 0)
-                conn.zremrangebyrank(queue, 0, 0)
+                pipeline.zrange(queue, 0, 0)
+                pipeline.zremrangebyrank(queue, 0, 0)
               end
             end.flatten(1)
 

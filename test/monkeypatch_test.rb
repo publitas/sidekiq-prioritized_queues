@@ -5,9 +5,10 @@ module Sidekiq
     describe 'Client Monkeypatch' do
       before do
         @redis = Minitest::Mock.new
-        def @redis.sadd(*); true; end
+        def @redis.sadd?(*); true; end
         def @redis.with; yield self; end
         def @redis.multi; [yield] * 2 if block_given?; end
+        def @redis.pipelined; yield self; end
         Sidekiq.instance_variable_set(:@redis, @redis)
         Sidekiq::Client.instance_variable_set(:@default, nil)
       end

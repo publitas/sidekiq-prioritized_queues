@@ -13,7 +13,7 @@ module Sidekiq
       else
         queue = payloads.first['queue']
         now = Time.now.to_f
-        conn.sadd('queues', queue)
+        conn.sadd?('queues', queue)
         payloads.each do |entry|
           entry['enqueued_at'] = now
           to_push  = Sidekiq.dump_json(entry)
