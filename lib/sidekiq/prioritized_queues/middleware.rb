@@ -2,7 +2,7 @@ module Sidekiq
   module PrioritizedQueues
     class Middleware
       def initialize(options = {})
-        @options = options
+        @options = options.compact
       end
 
       def call(worker_class, msg, queue, redis_pool)

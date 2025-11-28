@@ -5,7 +5,7 @@ module Sidekiq
       # can check if the process is shutting down.
       TIMEOUT = 2
 
-      UnitOfWork = Struct.new(:queue, :job) {
+      UnitOfWork = Struct.new(:queue, :job, :ignored) {
         def acknowledge
           # nothing to do
         end
@@ -16,15 +16,17 @@ module Sidekiq
 
         def requeue
           Sidekiq.redis do |conn|
-            conn.zadd(queue, 0, job)
+            ignored? ? conn.rpush(queue, job) : conn.zadd(queue, 0, job)
           end
         end
       }
 
-      def initialize(options)
+      def initialize(options, gem_options = {})
         raise ArgumentError, "missing queue list" unless options[:queues]
         @strictly_ordered_queues = !!options[:strict]
         @queues = options[:queues].map { |q| "queue:#{q}" }
+        @ignored_queues = gem_options.fetch(:ignored_queues, []).map { |q| "queue:#{q}" }
+
         if @strictly_ordered_queues
           @queues.uniq!
           @queues << TIMEOUT
@@ -37,12 +39,16 @@ module Sidekiq
         Sidekiq.redis do |conn|
           queues.each do |queue|
             response = conn.multi do
-              conn.zrange(queue, 0, 0)
-              conn.zremrangebyrank(queue, 0, 0)
+              if @ignored_queues.include?(queue)
+                conn.brpop(queue)
+              else
+                conn.zrange(queue, 0, 0)
+                conn.zremrangebyrank(queue, 0, 0)
+              end
             end.flatten(1)
 
             next if response.length == 1
-            work = [queue, response.first]
+            work = [queue, response.first, @ignored_queues.include?(queue)]
             break
           end
         end
@@ -69,7 +75,11 @@ module Sidekiq
           conn.pipelined do |pipeline|
             jobs_to_requeue.each do |queue, jobs|
               jobs.each do |job|
-                pipeline.zadd(queue, 0, job)
+                if @ignored_queues.include?(queue)
+                  pipeline.rpush(queue, job)
+                else
+                  pipeline.zadd(queue, 0, job)
+                end
               end
             end
           end
