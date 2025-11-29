@@ -17,7 +17,9 @@ module Sidekiq
         end
 
         klass_queue = klass.get_sidekiq_options['queue']
-        msg['queue'] = (klass_queue.is_a?(Proc) ? klass_queue.call(*msg['args']) : klass_queue).to_s
+        queue_name = klass_queue.is_a?(Proc) ? klass_queue.call(*msg['args']) : klass_queue
+        msg["queue"] = queue_name.nil? || queue_name.to_s.strip.empty? ? 'default' : queue_name.to_s
+
         yield
       end
 
