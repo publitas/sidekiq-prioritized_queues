@@ -16,7 +16,7 @@ module Sidekiq
 
         def requeue
           Sidekiq.redis do |conn|
-            prioritized ?  conn.zadd(queue, 0, job) : conn.rpush(queue, job)
+            prioritized ? conn.zadd(queue, 0, job) : conn.rpush(queue, job)
           end
         end
       }
