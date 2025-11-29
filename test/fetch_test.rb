@@ -28,7 +28,7 @@ module Sidekiq
 
         works = []
         2.times do
-          fetcher = Sidekiq::PrioritizedQueues::Fetch.new(queues: %w[default], ignored_queues: %w[ignored_queue])
+          fetcher = Sidekiq::PrioritizedQueues::Fetch.new(queues: %w[default])
           works << fetcher.retrieve_work
         end
         works.compact!
