@@ -6,7 +6,7 @@ module Sidekiq
       attr_reader :config
 
       def initialize(sidekiq_config)
-        @config = load_gem_config(sidekiq_config[:require])
+        @config = load_gem_config(sidekiq_config[:require] || '.')
       end
 
       def ignored_queues
