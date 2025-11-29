@@ -14,11 +14,11 @@ module Sidekiq
         ignored_queues = Sidekiq[:ignored_queues] || []
         queue = payloads.first['queue']
         now = Time.now.to_f
-        conn.sadd?("queues", queue)
+        conn.sadd?('queues', queue)
 
         if ignored_queues.include?(queue)
           to_push = payloads.map { |entry|
-            entry["enqueued_at"] = now
+            entry['enqueued_at'] = now
             Sidekiq.dump_json(entry)
           }
           conn.lpush("queue:#{queue}", to_push)
