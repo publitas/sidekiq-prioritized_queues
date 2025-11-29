@@ -5,7 +5,7 @@ module Sidekiq
       # can check if the process is shutting down.
       TIMEOUT = 2
 
-      UnitOfWork = Struct.new(:queue, :job, :ignored) {
+      UnitOfWork = Struct.new(:queue, :job, :prioritized) {
         def acknowledge
           # nothing to do
         end
@@ -16,7 +16,7 @@ module Sidekiq
 
         def requeue
           Sidekiq.redis do |conn|
-            ignored? ? conn.rpush(queue, job) : conn.zadd(queue, 0, job)
+            prioritized ?  conn.zadd(queue, 0, job) : conn.rpush(queue, job)
           end
         end
       }
@@ -25,7 +25,6 @@ module Sidekiq
         raise ArgumentError, "missing queue list" unless options[:queues]
         @strictly_ordered_queues = !!options[:strict]
         @queues = options[:queues].map { |q| "queue:#{q}" }
-        @ignored_queues = options.fetch(:ignored_queues, []).map { |q| "queue:#{q}" }
 
         if @strictly_ordered_queues
           @queues.uniq!
@@ -38,18 +37,20 @@ module Sidekiq
 
         Sidekiq.redis do |conn|
           queues.each do |queue|
-            response = conn.multi do |pipeline|
-              if @ignored_queues.include?(queue)
-                pipeline.brpop(queue)
-              else
+            if conn.type(queue).casecmp('zset').zero?
+              response = conn.multi do |pipeline|
                 pipeline.zrange(queue, 0, 0)
                 pipeline.zremrangebyrank(queue, 0, 0)
-              end
-            end.flatten(1)
+              end.flatten(1)
+              next if response.length == 1
 
-            next if response.length == 1
-            work = [queue, response.first, @ignored_queues.include?(queue)]
-            break
+              work = [queue, response.first, true]
+              break
+            else
+              queue, job = conn.brpop(queue, { timeout: TIMEOUT })
+              work = [queue, job, false] if job
+              break if work
+            end
           end
         end
 
@@ -75,10 +76,10 @@ module Sidekiq
           conn.pipelined do |pipeline|
             jobs_to_requeue.each do |queue, jobs|
               jobs.each do |job|
-                if @ignored_queues.include?(queue)
-                  pipeline.rpush(queue, job)
-                else
+                if conn.type(queue).casecmp('zset').zero?
                   pipeline.zadd(queue, 0, job)
+                else
+                  pipeline.rpush(queue, job)
                 end
               end
             end

@@ -1,29 +1,19 @@
 module Sidekiq
   module PrioritizedQueues
     class Middleware
-      def initialize(options = {})
-        @options = options.compact
-      end
-
       def call(worker_class, msg, queue, redis_pool)
         klass = case worker_class
         when String then constantize(worker_class)
         else worker_class
         end
 
-        ignored_queues = @options.fetch(:ignored_queues, [])
+        priority = klass.get_sidekiq_options['priority']
 
-        if ignored_queues.include?(queue)
-          msg['priority'] = false
-        else
-          priority = klass.get_sidekiq_options['priority']
-
-          msg['priority'] = case priority
-                            when Proc   then priority.call(*msg['args'])
-                            when String then priority.to_i
-                            when Integer then priority
-                            else Time.now.to_f
-                            end
+        msg['priority'] = case priority
+        when Proc   then priority.call(*msg['args'])
+        when String then priority.to_i
+        when Integer then priority
+        else Time.now.to_f
         end
 
         yield

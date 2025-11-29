@@ -11,7 +11,7 @@ Sidekiq.configure_server do |config|
   config.merge!(gem_config.config)
 
   config.client_middleware do |chain|
-    chain.add Sidekiq::PrioritizedQueues::Middleware, ignored_queues: gem_config.ignored_queues
+    chain.add Sidekiq::PrioritizedQueues::Middleware
   end
   # Set up the fetcher as the priority based one too.
   config[:fetch] = Sidekiq::PrioritizedQueues::Fetch.new(config)
@@ -22,6 +22,6 @@ Sidekiq.configure_client do |config|
   config.merge!(gem_config.config)
 
   config.client_middleware do |chain|
-    chain.add Sidekiq::PrioritizedQueues::Middleware, ignored_queues: gem_config.ignored_queues
+    chain.add Sidekiq::PrioritizedQueues::Middleware
   end
 end
