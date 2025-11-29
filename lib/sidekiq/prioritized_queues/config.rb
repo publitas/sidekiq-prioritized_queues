@@ -37,6 +37,7 @@ module Sidekiq
           hash[symkey] = hash.delete k
           symbolize_keys_deep! hash[symkey] if hash[symkey].is_a? Hash
         end
+        hash
       end
     end
   end
