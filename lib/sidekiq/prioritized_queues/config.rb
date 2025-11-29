@@ -28,7 +28,7 @@ module Sidekiq
           end
         end
 
-        gem_config.compact
+        gem_config.is_a?(Hash) ? gem_config.compact : {}
       end
 
       def symbolize_keys_deep!(hash)
