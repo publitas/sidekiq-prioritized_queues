@@ -21,11 +21,11 @@ module Sidekiq
         end
       }
 
-      def initialize(options, gem_options = {})
+      def initialize(options)
         raise ArgumentError, "missing queue list" unless options[:queues]
         @strictly_ordered_queues = !!options[:strict]
         @queues = options[:queues].map { |q| "queue:#{q}" }
-        @ignored_queues = gem_options.fetch(:ignored_queues, []).map { |q| "queue:#{q}" }
+        @ignored_queues = options.fetch(:ignored_queues, []).map { |q| "queue:#{q}" }
 
         if @strictly_ordered_queues
           @queues.uniq!

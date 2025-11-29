@@ -8,16 +8,18 @@ require 'sidekiq/prioritized_queues/config'
 # on the messages being queued.
 Sidekiq.configure_server do |config|
   gem_config = Sidekiq::PrioritizedQueues::Config.new(config)
+  config.merge!(gem_config.config)
 
   config.client_middleware do |chain|
     chain.add Sidekiq::PrioritizedQueues::Middleware, ignored_queues: gem_config.ignored_queues
   end
   # Set up the fetcher as the priority based one too.
-  config[:fetch] = Sidekiq::PrioritizedQueues::Fetch.new(config, gem_config.config)
+  config[:fetch] = Sidekiq::PrioritizedQueues::Fetch.new(config)
 end
 
 Sidekiq.configure_client do |config|
   gem_config = Sidekiq::PrioritizedQueues::Config.new(config)
+  config.merge!(gem_config.config)
 
   config.client_middleware do |chain|
     chain.add Sidekiq::PrioritizedQueues::Middleware, ignored_queues: gem_config.ignored_queues
