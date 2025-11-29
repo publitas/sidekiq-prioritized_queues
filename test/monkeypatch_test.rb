@@ -32,6 +32,14 @@ module Sidekiq
         Sidekiq::Client.push('class' => 'MockWorker', 'args' => [2])
         @redis.verify
       end
+
+      it 'pushes jobs to regular queue if in ignored_queues' do
+        @redis.expect :lpush, 1, ['queue:ignored_queue', Array]
+        client = Sidekiq::Client.new
+        Sidekiq[:ignored_queues] = ['ignored_queue']
+        client.push('class' => MockWorkerIgnoredQueue, 'args' => [nil])
+        @redis.verify
+      end
     end
   end
 end
