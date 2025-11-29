@@ -47,7 +47,7 @@ module Sidekiq
               work = [queue, response.first, true]
               break
             else
-              queue, job = conn.brpop(queue, { timeout: TIMEOUT })
+              _, job = conn.rpop(queue)
               work = [queue, job, false] if job
               break if work
             end

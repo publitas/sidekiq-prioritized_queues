@@ -37,6 +37,7 @@ module Sidekiq
 
         msg = Sidekiq.load_json(works.first.job)
         assert_equal 'MockWorker', msg['class']
+        assert_equal 200, msg['priority']
       end
     end
   end
