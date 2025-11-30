@@ -21,23 +21,21 @@ module Sidekiq
         end
       end
 
-      it 'does not fetch jobs from ignored queues' do
+      it 'fetch jobs from ignored queues with list-based Redis operations' do
         client = Sidekiq::Client.new
         client.push('class' => MockWorkerIgnoredQueue, 'args' => [nil])
         client.push('class' => MockWorker, 'args' => [20])
 
+        fetcher = Sidekiq::PrioritizedQueues::Fetch.new(
+          queues: %w[default ignored_queue],
+          ignored_queues: %w[ignored_queue],
+        )
+
         works = []
-        2.times do
-          fetcher = Sidekiq::PrioritizedQueues::Fetch.new(queues: %w[default])
-          works << fetcher.retrieve_work
-        end
+        2.times { works << fetcher.retrieve_work }
         works.compact!
 
-        assert_equal 1, works.length
-
-        msg = Sidekiq.load_json(works.first.job)
-        assert_equal 'MockWorker', msg['class']
-        assert_equal 200, msg['priority']
+        assert_equal 2, works.length
       end
     end
   end

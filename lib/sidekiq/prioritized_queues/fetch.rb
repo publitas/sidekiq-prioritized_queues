@@ -27,7 +27,7 @@ module Sidekiq
         @queues = options[:queues].map { |q| "queue:#{q}" }
 
         # Ignored queues are queues that are not prioritized, therefore they use list-based Redis push/pop
-        @ignored_queues = (options[:ignored_queues] || []).map { |q| "queue:#{q}" }
+        @ignored_queues = (options[:ignored_queues] || Sidekiq[:ignored_queues] || []).map { |q| "queue:#{q}" }
 
         if @strictly_ordered_queues
           @queues.uniq!
@@ -50,7 +50,7 @@ module Sidekiq
               work = [queue, response.first, true]
               break
             else
-              _, job = conn.rpop(queue)
+              job = conn.rpop(queue)
               work = [queue, job, false] if job
               break if work
             end
