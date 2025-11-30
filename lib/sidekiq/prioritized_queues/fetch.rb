@@ -26,6 +26,9 @@ module Sidekiq
         @strictly_ordered_queues = !!options[:strict]
         @queues = options[:queues].map { |q| "queue:#{q}" }
 
+        # Ignored queues are queues that are not prioritized, therefore they use list-based Redis push/pop
+        @ignored_queues = (options[:ignored_queues] || []).map { |q| "queue:#{q}" }
+
         if @strictly_ordered_queues
           @queues.uniq!
           @queues << TIMEOUT
@@ -37,7 +40,7 @@ module Sidekiq
 
         Sidekiq.redis do |conn|
           queues.each do |queue|
-            if conn.type(queue).casecmp('zset').zero?
+            if zset?(queue)
               response = conn.multi do |pipeline|
                 pipeline.zrange(queue, 0, 0)
                 pipeline.zremrangebyrank(queue, 0, 0)
@@ -76,7 +79,7 @@ module Sidekiq
           conn.pipelined do |pipeline|
             jobs_to_requeue.each do |queue, jobs|
               jobs.each do |job|
-                if conn.type(queue).casecmp('zset').zero?
+                if zset?(queue)
                   pipeline.zadd(queue, 0, job)
                 else
                   pipeline.rpush(queue, job)
@@ -88,6 +91,13 @@ module Sidekiq
         Sidekiq.logger.info("Pushed #{inprogress.size} jobs back to Redis")
       rescue => ex
         Sidekiq.logger.warn("Failed to requeue #{inprogress.size} jobs: #{ex.message}")
+      end
+
+      private
+
+      def zset?(queue)
+        @memo ||= {}
+        @memo.fetch(queue) { @memo[queue] = !@ignored_queues.include?(queue) }
       end
     end
   end
