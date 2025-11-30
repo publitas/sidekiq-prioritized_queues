@@ -20,7 +20,7 @@ module Sidekiq
         gem_config = {}
 
         if File.exist?(config_file_path)
-          gem_config = YAML.load_file(config_file_path)
+          gem_config = YAML.safe_load_file(config_file_path)
           if gem_config.respond_to?(:deep_symbolize_keys!)
             gem_config.deep_symbolize_keys!
           else
