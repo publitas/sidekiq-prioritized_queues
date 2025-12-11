@@ -20,24 +20,34 @@ module Sidekiq
         gem_config = {}
 
         if File.exist?(config_file_path)
-          gem_config = YAML.safe_load_file(config_file_path)
-          if gem_config.respond_to?(:deep_symbolize_keys!)
-            gem_config.deep_symbolize_keys!
-          else
-            symbolize_keys_deep!(gem_config)
+          begin
+            gem_config = YAML.safe_load_file(config_file_path) || {}
+            if gem_config.respond_to?(:deep_symbolize_keys!)
+              gem_config.deep_symbolize_keys!
+            else
+              gem_config = symbolize_keys_deep(gem_config)
+            end
+          rescue Psych::SyntaxError, Psych::Exception => e
+            warn "Sidekiq::PrioritizedQueues: Failed to load config file at #{config_file_path}: #{e.class}: #{e.message}"
+            gem_config = {}
           end
         end
 
         gem_config.is_a?(Hash) ? gem_config.compact : {}
       end
 
-      def symbolize_keys_deep!(hash)
-        hash.keys.each do |k|
-          symkey = k.respond_to?(:to_sym) ? k.to_sym : k
-          hash[symkey] = hash.delete k
-          symbolize_keys_deep! hash[symkey] if hash[symkey].is_a? Hash
+      def symbolize_keys_deep(obj)
+        case obj
+        when Hash
+          obj.each_with_object({}) do |(k, v), result|
+            key = k.respond_to?(:to_sym) ? k.to_sym : k
+            result[key] = symbolize_keys_deep(v)
+          end
+        when Array
+          obj.map { |v| symbolize_keys_deep(v) }
+        else
+          obj
         end
-        hash
       end
     end
   end
