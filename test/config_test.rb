@@ -10,7 +10,7 @@ module Sidekiq
       end
 
       it 'should return empty array if no ignored queues are set' do
-        config = { require: File.join(__dir__, 'unexistent') }
+        config = { require: File.join(__dir__, 'nonexistent') }
         gem_config = Sidekiq::PrioritizedQueues::Config.new(config)
         assert_equal [], gem_config.ignored_queues
       end
