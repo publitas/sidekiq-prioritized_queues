@@ -88,7 +88,6 @@ module Sidekiq
             end
           end
         end
-        Sidekiq.logger.info("Pushed #{inprogress.size} jobs back to Redis")
       rescue => ex
         Sidekiq.logger.warn("Failed to requeue #{inprogress.size} jobs: #{ex.message}")
       end
