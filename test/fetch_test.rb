@@ -37,6 +37,136 @@ module Sidekiq
 
         assert_equal 2, works.length
       end
+
+      describe 'UnitOfWork#requeue' do
+        it 'requeues jobs from prioritized queues using zadd' do
+          # Create a job in a prioritized queue
+          job = Sidekiq.dump_json({ 'class' => 'MockWorker', 'args' => [10] })
+          queue_name = 'queue:default'
+
+          # Create a UnitOfWork for a prioritized queue
+          unit_of_work = Sidekiq::PrioritizedQueues::Fetch::UnitOfWork.new(queue_name, job, true)
+
+          # Requeue the job
+          unit_of_work.requeue
+
+          # Verify the job was added to the zset (prioritized queue)
+          Sidekiq.redis do |conn|
+            # Check that the job is in the zset
+            zset_members = conn.zrange(queue_name, 0, -1)
+            assert_includes zset_members, job
+          end
+        end
+
+        it 'requeues jobs from ignored queues using rpush' do
+          # Create a job in an ignored queue
+          job = Sidekiq.dump_json({ 'class' => 'MockWorkerIgnoredQueue', 'args' => [nil] })
+          queue_name = 'queue:ignored_queue'
+
+          # Create a UnitOfWork for an ignored (list-based) queue
+          unit_of_work = Sidekiq::PrioritizedQueues::Fetch::UnitOfWork.new(queue_name, job, false)
+
+          # Requeue the job
+          unit_of_work.requeue
+
+          # Verify the job was added to the list (ignored queue)
+          Sidekiq.redis do |conn|
+            # Check that the job is in the list
+            list_members = conn.lrange(queue_name, 0, -1)
+            assert_includes list_members, job
+          end
+        end
+      end
+
+      describe 'Fetch#bulk_requeue' do
+        it 'requeues multiple jobs from prioritized queues using zadd' do
+          job1 = Sidekiq.dump_json({ 'class' => 'MockWorker', 'args' => [10] })
+          job2 = Sidekiq.dump_json({ 'class' => 'MockWorker', 'args' => [20] })
+          queue_name = 'queue:default'
+
+          fetcher = Sidekiq::PrioritizedQueues::Fetch.new(
+            queues: ['default'],
+            ignored_queues: %w[ignored_queue],
+          )
+
+          # Create UnitOfWork objects for prioritized queues
+          units = [
+            Sidekiq::PrioritizedQueues::Fetch::UnitOfWork.new(queue_name, job1, true),
+            Sidekiq::PrioritizedQueues::Fetch::UnitOfWork.new(queue_name, job2, true),
+          ]
+
+          # Bulk requeue the jobs
+          fetcher.bulk_requeue(units, {})
+
+          # Verify both jobs were added to the zset
+          Sidekiq.redis do |conn|
+            zset_members = conn.zrange(queue_name, 0, -1)
+            assert_includes zset_members, job1
+            assert_includes zset_members, job2
+            assert_equal 2, zset_members.length
+          end
+        end
+
+        it 'requeues multiple jobs from ignored queues using rpush' do
+          job1 = Sidekiq.dump_json({ 'class' => 'MockWorkerIgnoredQueue', 'args' => [nil] })
+          job2 = Sidekiq.dump_json({ 'class' => 'MockWorkerIgnoredQueue', 'args' => [nil] })
+          queue_name = 'queue:ignored_queue'
+
+          fetcher = Sidekiq::PrioritizedQueues::Fetch.new(
+            queues: %w[default ignored_queue],
+            ignored_queues: %w[ignored_queue],
+          )
+
+          # Create UnitOfWork objects for ignored (list-based) queues
+          units = [
+            Sidekiq::PrioritizedQueues::Fetch::UnitOfWork.new(queue_name, job1, false),
+            Sidekiq::PrioritizedQueues::Fetch::UnitOfWork.new(queue_name, job2, false),
+          ]
+
+          # Bulk requeue the jobs
+          fetcher.bulk_requeue(units, {})
+
+          # Verify both jobs were added to the list
+          Sidekiq.redis do |conn|
+            list_members = conn.lrange(queue_name, 0, -1)
+            assert_includes list_members, job1
+            assert_includes list_members, job2
+            assert_equal 2, list_members.length
+          end
+        end
+
+        it 'requeues jobs from mixed prioritized and ignored queues' do
+          job_priority = Sidekiq.dump_json({ 'class' => 'MockWorker', 'args' => [10] })
+          job_ignored = Sidekiq.dump_json({ 'class' => 'MockWorkerIgnoredQueue', 'args' => [nil] })
+
+          queue_priority = 'queue:default'
+          queue_ignored = 'queue:ignored_queue'
+
+          fetcher = Sidekiq::PrioritizedQueues::Fetch.new(
+            queues: %w[default ignored_queue],
+            ignored_queues: %w[ignored_queue],
+          )
+
+          # Create UnitOfWork objects for both types of queues
+          units = [
+            Sidekiq::PrioritizedQueues::Fetch::UnitOfWork.new(queue_priority, job_priority, true),
+            Sidekiq::PrioritizedQueues::Fetch::UnitOfWork.new(queue_ignored, job_ignored, false),
+          ]
+
+          # Bulk requeue the jobs
+          fetcher.bulk_requeue(units, {})
+
+          # Verify prioritized job was added to zset
+          Sidekiq.redis do |conn|
+            zset_members = conn.zrange(queue_priority, 0, -1)
+            assert_includes zset_members, job_priority
+
+            # Verify ignored job was added to list
+            list_members = conn.lrange(queue_ignored, 0, -1)
+            assert_includes list_members, job_ignored
+          end
+        end
+      end
     end
   end
 end
