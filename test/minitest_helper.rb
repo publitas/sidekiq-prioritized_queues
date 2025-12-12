@@ -31,35 +31,3 @@ class MockWorkerIgnoredQueue
   def perform(arg)
   end
 end
-
-class MockWorkerProcQueue
-  include Sidekiq::Worker
-  sidekiq_options queue: -> (arg) { "queue_#{arg}" }
-
-  def perform(arg)
-  end
-end
-
-class MockWorkerNilQueue
-  include Sidekiq::Worker
-  sidekiq_options queue: nil
-
-  def perform(arg)
-  end
-end
-
-class MockWorkerEmptyQueue
-  include Sidekiq::Worker
-  sidekiq_options queue: ''
-
-  def perform(arg)
-  end
-end
-
-class MockWorkerSymbolQueue
-  include Sidekiq::Worker
-  sidekiq_options queue: :symbol_queue
-
-  def perform(arg)
-  end
-end

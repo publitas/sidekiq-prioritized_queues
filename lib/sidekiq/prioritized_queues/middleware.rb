@@ -16,10 +16,6 @@ module Sidekiq
         else Time.now.to_f
         end
 
-        klass_queue = klass.get_sidekiq_options['queue']
-        queue_name = klass_queue.is_a?(Proc) ? klass_queue.call(*msg['args']) : klass_queue
-        msg["queue"] = queue_name.nil? || queue_name.to_s.strip.empty? ? 'default' : queue_name.to_s
-
         yield
       end
 

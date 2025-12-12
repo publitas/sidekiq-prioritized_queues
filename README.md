@@ -70,26 +70,6 @@ end
 
 The example above would make sure that VIP accounts get processed first.
 
-### Queue Resolution
-
-The `queue` option also supports dynamic resolution through a `Proc`. This allows you to route jobs to different queues based on their arguments:
-
-```ruby
-class ProcessOrderWorker
-  include Sidekiq::Worker
-  sidekiq_options queue: -> (order_id) {
-    order = Order.find(order_id)
-    order.premium? ? 'premium_orders' : 'standard_orders'
-  }
-
-  def perform(order_id)
-    # Process the order
-  end
-end
-```
-
-The queue name will be automatically converted to a string, and if the `Proc` returns `nil` or an empty string, the queue will default to `'default'`.
-
 ### Ignored Queues
 
 By default, all queues use priority-based (sorted set) operations. However, you can configure specific queues to use traditional FIFO (list-based) operations by marking them as "ignored queues". This is useful when you want certain queues to maintain strict FIFO ordering without priority sorting.
