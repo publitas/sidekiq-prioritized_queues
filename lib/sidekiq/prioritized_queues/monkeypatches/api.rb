@@ -54,13 +54,13 @@ module Sidekiq
         conn.sscan_each('queues').to_a
       end
 
-      ignored_queues = Sidekiq[:ignored_queues] || []
+      non_prioritized_queues = Sidekiq[:non_prioritized_queues] || []
 
       pipe2_res = Sidekiq.redis do |conn|
         conn.pipelined do
           processes.each { |key| conn.hget(key, 'busy') }
           queues.each do |queue|
-            if ignored_queues.include?(queue)
+            if non_prioritized_queues.include?(queue)
               conn.llen("queue:#{queue}")
             else
               conn.zcard("queue:#{queue}")
@@ -80,12 +80,14 @@ module Sidekiq
 
     class Queues
       def lengths
+        non_prioritized_queues = Sidekiq[:non_prioritized_queues] || []
+
         Sidekiq.redis do |conn|
           queues = conn.sscan_each('queues').to_a
 
           lengths = conn.pipelined {
             queues.each do |queue|
-              if ignored_queues.include?(queue)
+              if non_prioritized_queues.include?(queue)
                 conn.llen("queue:#{queue}")
               else
                 conn.zcard("queue:#{queue}")
@@ -103,20 +105,20 @@ module Sidekiq
   class Queue
     def size
       Sidekiq.redis do |conn|
-        if ignored?
-          conn.llen(@rname)
-        else
+        if prioritized?
           conn.zcard(@rname)
+        else
+          conn.llen(@rname)
         end
       end
     end
 
     def latency
       entry = Sidekiq.redis do |conn|
-        if ignored?
-          conn.lrange(@rname, -1, -1)
-        else
+        if prioritized?
           conn.zrange(@rname, -1, -1)
+        else
+          conn.lrange(@rname, -1, -1)
         end
       end.first
       return 0 unless entry
@@ -136,10 +138,10 @@ module Sidekiq
         range_start = page * page_size - deleted_size
         range_end = range_start + page_size - 1
         entries = Sidekiq.redis do |conn|
-          if ignored?
-            conn.lrange(@rname, range_start, range_end)
-          else
+          if prioritized?
             conn.zrevrange(@rname, range_start, range_end)
+          else
+            conn.lrange(@rname, range_start, range_end)
           end
         end
         break if entries.empty?
@@ -156,10 +158,10 @@ module Sidekiq
         conn.multi do
           conn.unlink(@rname)
 
-          if ignored?
-            conn.srem('queues', [name])
-          else
+          if prioritized?
             conn.zrem('queues', name)
+          else
+            conn.srem('queues', [name])
           end
         end
       end
@@ -167,18 +169,18 @@ module Sidekiq
 
     private
 
-    def ignored?
-      @ignored ||= (Sidekiq[:ignored_queues] || []).include?(name)
+    def prioritized?
+      @prioritized ||= !(Sidekiq[:non_prioritized_queues] || []).include?(name)
     end
   end
 
   class JobRecord
     def delete
       count = Sidekiq.redis do |conn|
-        if ignored?
-          conn.lrem("queue:#{@queue}", 1, @value)
-        else
+        if prioritized?
           conn.zrem("queue:#{@queue}", @value)
+        else
+          conn.lrem("queue:#{@queue}", 1, @value)
         end
       end
       count != 0
@@ -186,8 +188,8 @@ module Sidekiq
 
     private
 
-    def ignored?
-      @ignored ||= (Sidekiq[:ignored_queues] || []).include?(@queue)
+    def prioritized?
+      @prioritized ||= !(Sidekiq[:non_prioritized_queues] || []).include?(@queue)
     end
   end
 end

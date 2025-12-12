@@ -1,2 +1,2 @@
-ignored_queues:
+non_prioritized_queues:
   - ignored_queue

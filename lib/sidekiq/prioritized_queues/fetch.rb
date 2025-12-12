@@ -26,8 +26,10 @@ module Sidekiq
         @strictly_ordered_queues = !!options[:strict]
         @queues = options[:queues].map { |q| "queue:#{q}" }
 
-        # Ignored queues are queues that are not prioritized, therefore they use list-based Redis push/pop
-        @ignored_queues = (options[:ignored_queues] || Sidekiq[:ignored_queues] || []).map { |q| "queue:#{q}" }
+        # Non prioritized queues use list-based Redis push/pop
+        @non_prioritized_queues =
+          (options[:non_prioritized_queues] || Sidekiq[:non_prioritized_queues] || [])
+            .map { |q| "queue:#{q}" }
 
         if @strictly_ordered_queues
           @queues.uniq!
@@ -96,7 +98,7 @@ module Sidekiq
 
       def zset?(queue)
         @memo ||= {}
-        @memo.fetch(queue) { @memo[queue] = !@ignored_queues.include?(queue) }
+        @memo.fetch(queue) { @memo[queue] = !@non_prioritized_queues.include?(queue) }
       end
     end
   end

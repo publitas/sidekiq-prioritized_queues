@@ -9,8 +9,8 @@ module Sidekiq
         @config = load_gem_config(sidekiq_config[:require] || '.')
       end
 
-      def ignored_queues
-        @config.fetch(:ignored_queues, [])
+      def non_prioritized_queues
+        @config.fetch(:non_prioritized_queues, [])
       end
 
       private

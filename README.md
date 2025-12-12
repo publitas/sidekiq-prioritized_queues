@@ -70,14 +70,14 @@ end
 
 The example above would make sure that VIP accounts get processed first.
 
-### Ignored Queues
+### Non Prioritized Queues
 
-By default, all queues use priority-based (sorted set) operations. However, you can configure specific queues to use traditional FIFO (list-based) operations by marking them as "ignored queues". This is useful when you want certain queues to maintain strict FIFO ordering without priority sorting.
+By default, all queues use priority-based (sorted set) operations. However, you can configure specific queues to use traditional FIFO (list-based) operations by marking them as "non prioritized queues". This is useful when you want certain queues to maintain strict FIFO ordering without priority sorting.
 
-Ignored queues are configured in `config/sidekiq_prioritized_queues.yml`:
+Non prioritized queues are configured in `config/sidekiq_prioritized_queues.yml`:
 
 ```yaml
-ignored_queues:
+non_prioritized_queues:
   - webhooks
   - notifications
   - cleanup
@@ -86,7 +86,7 @@ ignored_queues:
 With this configuration:
 - Jobs in the `webhooks`, `notifications`, and `cleanup` queues will be processed in strict FIFO order
 - Jobs in all other queues will be processed based on their priority values
-- You can still use priority-based and dynamic queue routing for workers, but if they push to an ignored queue, the job will be enqueued using FIFO
+- You can still use priority-based and dynamic queue routing for workers, but if they push to a non prioritized queue, the job will be enqueued using FIFO
 
 This is particularly useful for queues where order of execution is critical and you don't want priority-based reordering to affect the processing sequence.
 

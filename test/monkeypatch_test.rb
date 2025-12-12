@@ -33,11 +33,11 @@ module Sidekiq
         @redis.verify
       end
 
-      it 'pushes jobs to regular queue if in ignored_queues' do
-        @redis.expect :lpush, 1, ['queue:ignored_queue', Array]
+      it 'pushes jobs to regular queue if in non prioritized queue' do
+        @redis.expect :lpush, 1, ['queue:non_prio', Array]
         client = Sidekiq::Client.new
-        Sidekiq[:ignored_queues] = ['ignored_queue']
-        client.push('class' => MockWorkerIgnoredQueue, 'args' => [nil])
+        Sidekiq[:non_prioritized_queues] = ['non_prio']
+        client.push('class' => MockWorkerNonPrioritizedQueue, 'args' => [nil])
         @redis.verify
       end
     end

@@ -6,7 +6,7 @@ module Sidekiq
       before do
         Sidekiq.redis = REDIS
         Sidekiq.redis { |c| c.flushdb }
-        Sidekiq[:ignored_queues] = %w[ignored_queue]
+        Sidekiq[:non_prioritized_queues] = %w[non_prio]
       end
 
       it 'should fetch jobs in the right priority' do
@@ -23,12 +23,12 @@ module Sidekiq
 
       it 'fetch jobs from ignored queues with list-based Redis operations' do
         client = Sidekiq::Client.new
-        client.push('class' => MockWorkerIgnoredQueue, 'args' => [nil])
+        client.push('class' => MockWorkerNonPrioritizedQueue, 'args' => [nil])
         client.push('class' => MockWorker, 'args' => [20])
 
         fetcher = Sidekiq::PrioritizedQueues::Fetch.new(
-          queues: %w[default ignored_queue],
-          ignored_queues: %w[ignored_queue],
+          queues: %w[default non_prio],
+          non_prioritized_queues: %w[non_prio],
         )
 
         works = []
@@ -60,8 +60,8 @@ module Sidekiq
 
         it 'requeues jobs from ignored queues using rpush' do
           # Create a job in an ignored queue
-          job = Sidekiq.dump_json({ 'class' => 'MockWorkerIgnoredQueue', 'args' => [nil] })
-          queue_name = 'queue:ignored_queue'
+          job = Sidekiq.dump_json({ 'class' => 'MockWorkerNonPrioritizedQueue', 'args' => [nil] })
+          queue_name = 'queue:non_prio'
 
           # Create a UnitOfWork for an ignored (list-based) queue
           unit_of_work = Sidekiq::PrioritizedQueues::Fetch::UnitOfWork.new(queue_name, job, false)
@@ -86,7 +86,7 @@ module Sidekiq
 
           fetcher = Sidekiq::PrioritizedQueues::Fetch.new(
             queues: ['default'],
-            ignored_queues: %w[ignored_queue],
+            non_prioritized_queues: %w[non_prio],
           )
 
           # Create UnitOfWork objects for prioritized queues
@@ -108,13 +108,13 @@ module Sidekiq
         end
 
         it 'requeues multiple jobs from ignored queues using rpush' do
-          job1 = Sidekiq.dump_json({ 'class' => 'MockWorkerIgnoredQueue', 'args' => [nil] })
-          job2 = Sidekiq.dump_json({ 'class' => 'MockWorkerIgnoredQueue', 'args' => [nil] })
-          queue_name = 'queue:ignored_queue'
+          job1 = Sidekiq.dump_json({ 'class' => 'MockWorkerNonPrioritizedQueue', 'args' => [nil] })
+          job2 = Sidekiq.dump_json({ 'class' => 'MockWorkerNonPrioritizedQueue', 'args' => [nil] })
+          queue_name = 'queue:non_prio'
 
           fetcher = Sidekiq::PrioritizedQueues::Fetch.new(
-            queues: %w[default ignored_queue],
-            ignored_queues: %w[ignored_queue],
+            queues: %w[default non_prio],
+            non_prioritized_queues: %w[non_prio],
           )
 
           # Create UnitOfWork objects for ignored (list-based) queues
@@ -137,14 +137,14 @@ module Sidekiq
 
         it 'requeues jobs from mixed prioritized and ignored queues' do
           job_priority = Sidekiq.dump_json({ 'class' => 'MockWorker', 'args' => [10] })
-          job_ignored = Sidekiq.dump_json({ 'class' => 'MockWorkerIgnoredQueue', 'args' => [nil] })
+          job_ignored = Sidekiq.dump_json({ 'class' => 'MockWorkerNonPrioritizedQueue', 'args' => [nil] })
 
           queue_priority = 'queue:default'
-          queue_ignored = 'queue:ignored_queue'
+          queue_ignored = 'queue:non_prio'
 
           fetcher = Sidekiq::PrioritizedQueues::Fetch.new(
-            queues: %w[default ignored_queue],
-            ignored_queues: %w[ignored_queue],
+            queues: %w[default non_prio],
+            non_prioritized_queues: %w[non_prio],
           )
 
           # Create UnitOfWork objects for both types of queues
