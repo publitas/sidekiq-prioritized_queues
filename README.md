@@ -23,9 +23,11 @@ gem 'sidekiq-prioritized_queues'
 
 Simply having the gem in your Gemfile is enough to get started with prioritized jobs. As a default, priority will be the timestamp at which the job is enqueued, as to simulate the default FIFO order.
 
+### Priority
+
 There are two ways of specifying priority:
 
-### Static
+#### Static
 
 This is useful whenever different workers share the same queue. An example would be:
 
@@ -49,7 +51,7 @@ class SatisfyOrderWorker
 end
 ```
 
-### Dynamic
+#### Dynamic
 
 For workers on the same queue, the `priority` option can take a `Proc` which will be given the arguments the job was queued with. As an example:
 
@@ -67,6 +69,26 @@ end
 ```
 
 The example above would make sure that VIP accounts get processed first.
+
+### Non Prioritized Queues
+
+By default, all queues use priority-based (sorted set) operations. However, you can configure specific queues to use traditional FIFO (list-based) operations by marking them as "non prioritized queues". This is useful when you want certain queues to maintain strict FIFO ordering without priority sorting.
+
+Non prioritized queues are configured in `config/sidekiq_prioritized_queues.yml`:
+
+```yaml
+non_prioritized_queues:
+  - webhooks
+  - notifications
+  - cleanup
+```
+
+With this configuration:
+- Jobs in the `webhooks`, `notifications`, and `cleanup` queues will be processed in strict FIFO order
+- Jobs in all other queues will be processed based on their priority values
+- You can still use priority-based and dynamic queue routing for workers, but if they push to a non prioritized queue, the job will be enqueued using FIFO
+
+This is particularly useful for queues where order of execution is critical and you don't want priority-based reordering to affect the processing sequence.
 
 ## Contributing
 

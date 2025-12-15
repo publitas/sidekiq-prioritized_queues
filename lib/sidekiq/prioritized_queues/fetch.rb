@@ -5,7 +5,7 @@ module Sidekiq
       # can check if the process is shutting down.
       TIMEOUT = 2
 
-      UnitOfWork = Struct.new(:queue, :job) {
+      UnitOfWork = Struct.new(:queue, :job, :prioritized) {
         def acknowledge
           # nothing to do
         end
@@ -16,7 +16,7 @@ module Sidekiq
 
         def requeue
           Sidekiq.redis do |conn|
-            conn.zadd(queue, 0, job)
+            prioritized ? conn.zadd(queue, 0, job) : conn.rpush(queue, job)
           end
         end
       }
@@ -25,6 +25,12 @@ module Sidekiq
         raise ArgumentError, "missing queue list" unless options[:queues]
         @strictly_ordered_queues = !!options[:strict]
         @queues = options[:queues].map { |q| "queue:#{q}" }
+
+        # Non prioritized queues use list-based Redis push/pop
+        @non_prioritized_queues =
+          (options[:non_prioritized_queues] || Sidekiq[:non_prioritized_queues] || [])
+            .map { |q| "queue:#{q}" }
+
         if @strictly_ordered_queues
           @queues.uniq!
           @queues << TIMEOUT
@@ -36,14 +42,20 @@ module Sidekiq
 
         Sidekiq.redis do |conn|
           queues.each do |queue|
-            response = conn.multi do
-              conn.zrange(queue, 0, 0)
-              conn.zremrangebyrank(queue, 0, 0)
-            end.flatten(1)
+            if zset?(queue)
+              response = conn.multi do |pipeline|
+                pipeline.zrange(queue, 0, 0)
+                pipeline.zremrangebyrank(queue, 0, 0)
+              end.flatten(1)
+              next if response.length == 1
 
-            next if response.length == 1
-            work = [queue, response.first]
-            break
+              work = [queue, response.first, true]
+              break
+            else
+              job = conn.rpop(queue)
+              work = [queue, job, false] if job
+              break if work
+            end
           end
         end
 
@@ -69,14 +81,24 @@ module Sidekiq
           conn.pipelined do |pipeline|
             jobs_to_requeue.each do |queue, jobs|
               jobs.each do |job|
-                pipeline.zadd(queue, 0, job)
+                if zset?(queue)
+                  pipeline.zadd(queue, 0, job)
+                else
+                  pipeline.rpush(queue, job)
+                end
               end
             end
           end
         end
-        Sidekiq.logger.info("Pushed #{inprogress.size} jobs back to Redis")
       rescue => ex
         Sidekiq.logger.warn("Failed to requeue #{inprogress.size} jobs: #{ex.message}")
+      end
+
+      private
+
+      def zset?(queue)
+        @memo ||= {}
+        @memo.fetch(queue) { @memo[queue] = !@non_prioritized_queues.include?(queue) }
       end
     end
   end

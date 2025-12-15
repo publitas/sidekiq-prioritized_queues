@@ -20,7 +20,7 @@ Gem::Specification.new do |spec|
 
   spec.add_dependency "sidekiq", "~> 6.2", ">= 6.2.2"
 
-  spec.add_development_dependency "bundler", "~> 1.17"
+  spec.add_development_dependency "bundler", "~> 2.4"
   spec.add_development_dependency "rake", "~> 13.0"
   spec.add_development_dependency "minitest"
   spec.add_development_dependency "sinatra"

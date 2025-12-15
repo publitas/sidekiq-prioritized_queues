@@ -11,14 +11,24 @@ module Sidekiq
           [at, Sidekiq.dump_json(hash)]
         end)
       else
+        non_prioritized_queues = Sidekiq[:non_prioritized_queues] || []
         queue = payloads.first['queue']
         now = Time.now.to_f
-        conn.sadd('queues', queue)
-        payloads.each do |entry|
-          entry['enqueued_at'] = now
-          to_push  = Sidekiq.dump_json(entry)
-          priority = entry['priority'] || 0
-          conn.zadd("queue:#{queue}", priority, to_push)
+        conn.sadd?('queues', queue)
+
+        if non_prioritized_queues.include?(queue)
+          to_push = payloads.map { |entry|
+            entry['enqueued_at'] = now
+            Sidekiq.dump_json(entry)
+          }
+          conn.lpush("queue:#{queue}", to_push)
+        else
+          payloads.each do |entry|
+            entry['enqueued_at'] = now
+            to_push  = Sidekiq.dump_json(entry)
+            priority = entry['priority'] || 0
+            conn.zadd("queue:#{queue}", priority, to_push)
+          end
         end
       end
     end

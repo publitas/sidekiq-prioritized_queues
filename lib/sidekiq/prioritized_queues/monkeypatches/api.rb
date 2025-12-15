@@ -12,7 +12,12 @@ module Sidekiq
           conn.zcard('retry')
           conn.zcard('dead')
           conn.scard('processes')
-          conn.zrange('queue:default', -1, -1)
+          begin
+            conn.zrange('queue:default', -1, -1)
+          rescue Redis::CommandError
+            # If default queue is ignored, zrange will raise a command error
+            conn.lrange("queue:default", -1, -1)
+          end
         end
       end
 
@@ -49,10 +54,18 @@ module Sidekiq
         conn.sscan_each('queues').to_a
       end
 
+      non_prioritized_queues = Sidekiq[:non_prioritized_queues] || []
+
       pipe2_res = Sidekiq.redis do |conn|
         conn.pipelined do
           processes.each { |key| conn.hget(key, 'busy') }
-          queues.each { |queue| conn.zcard("queue:#{queue}") }
+          queues.each do |queue|
+            if non_prioritized_queues.include?(queue)
+              conn.llen("queue:#{queue}")
+            else
+              conn.zcard("queue:#{queue}")
+            end
+          end
         end
       end
 
@@ -62,16 +75,23 @@ module Sidekiq
 
       @stats[:workers_size] = workers_size
       @stats[:enqueued] = enqueued
+      @stats
     end
 
     class Queues
       def lengths
+        non_prioritized_queues = Sidekiq[:non_prioritized_queues] || []
+
         Sidekiq.redis do |conn|
           queues = conn.sscan_each('queues').to_a
 
           lengths = conn.pipelined {
             queues.each do |queue|
-              conn.zcard("queue:#{queue}")
+              if non_prioritized_queues.include?(queue)
+                conn.llen("queue:#{queue}")
+              else
+                conn.zcard("queue:#{queue}")
+              end
             end
           }
 
@@ -84,12 +104,22 @@ module Sidekiq
 
   class Queue
     def size
-      Sidekiq.redis { |conn| conn.zcard(@rname) }
+      Sidekiq.redis do |conn|
+        if prioritized?
+          conn.zcard(@rname)
+        else
+          conn.llen(@rname)
+        end
+      end
     end
 
     def latency
       entry = Sidekiq.redis do |conn|
-        conn.zrange(@rname, -1, -1)
+        if prioritized?
+          conn.zrange(@rname, -1, -1)
+        else
+          conn.lrange(@rname, -1, -1)
+        end
       end.first
       return 0 unless entry
       job = Sidekiq.load_json(entry)
@@ -108,7 +138,11 @@ module Sidekiq
         range_start = page * page_size - deleted_size
         range_end = range_start + page_size - 1
         entries = Sidekiq.redis do |conn|
-          conn.zrevrange @rname, range_start, range_end
+          if prioritized?
+            conn.zrevrange(@rname, range_start, range_end)
+          else
+            conn.lrange(@rname, range_start, range_end)
+          end
         end
         break if entries.empty?
         page += 1
@@ -123,18 +157,39 @@ module Sidekiq
       Sidekiq.redis do |conn|
         conn.multi do
           conn.unlink(@rname)
-          conn.zrem("queues", name)
+
+          if prioritized?
+            conn.zrem('queues', name)
+          else
+            conn.srem('queues', [name])
+          end
         end
       end
+    end
+
+    private
+
+    def prioritized?
+      @prioritized ||= !(Sidekiq[:non_prioritized_queues] || []).include?(name)
     end
   end
 
   class JobRecord
     def delete
       count = Sidekiq.redis do |conn|
-        conn.zrem("queue:#{@queue}", @value)
+        if prioritized?
+          conn.zrem("queue:#{@queue}", @value)
+        else
+          conn.lrem("queue:#{@queue}", 1, @value)
+        end
       end
       count != 0
+    end
+
+    private
+
+    def prioritized?
+      @prioritized ||= !(Sidekiq[:non_prioritized_queues] || []).include?(@queue)
     end
   end
 end

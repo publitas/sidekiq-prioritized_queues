@@ -5,9 +5,10 @@ module Sidekiq
     describe 'Client Monkeypatch' do
       before do
         @redis = Minitest::Mock.new
-        def @redis.sadd(*); true; end
+        def @redis.sadd?(*); true; end
         def @redis.with; yield self; end
         def @redis.multi; [yield] * 2 if block_given?; end
+        def @redis.pipelined; yield self; end
         Sidekiq.instance_variable_set(:@redis, @redis)
         Sidekiq::Client.instance_variable_set(:@default, nil)
       end
@@ -29,6 +30,14 @@ module Sidekiq
       it 'pushes jobs with the right score' do
         @redis.expect :zadd, 1, ['queue:default', 20, String]
         Sidekiq::Client.push('class' => 'MockWorker', 'args' => [2])
+        @redis.verify
+      end
+
+      it 'pushes jobs to regular queue if in non prioritized queue' do
+        @redis.expect :lpush, 1, ['queue:non_prio', Array]
+        client = Sidekiq::Client.new
+        Sidekiq[:non_prioritized_queues] = ['non_prio']
+        client.push('class' => MockWorkerNonPrioritizedQueue, 'args' => [nil])
         @redis.verify
       end
     end

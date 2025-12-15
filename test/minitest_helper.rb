@@ -23,3 +23,11 @@ class MockWorkerFixedPrio
   def perform(arg)
   end
 end
+
+class MockWorkerNonPrioritizedQueue
+  include Sidekiq::Worker
+  sidekiq_options queue: 'non_prio'
+
+  def perform(arg)
+  end
+end
