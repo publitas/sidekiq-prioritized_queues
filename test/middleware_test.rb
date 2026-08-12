@@ -4,8 +4,8 @@ module Sidekiq
   module PrioritizedQueues
     describe Middleware do
       before do
-        Sidekiq.redis = REDIS
         Sidekiq.redis { |c| c.flushdb }
+        Sidekiq.default_configuration[:non_prioritized_queues] = []
       end
 
       it 'should add the priority field to jobs' do

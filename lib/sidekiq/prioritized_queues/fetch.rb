@@ -1,11 +1,15 @@
+require 'sidekiq/component'
+
 module Sidekiq
   module PrioritizedQueues
     class Fetch
+      include Sidekiq::Component
+
       # We want the fetch operation to timeout every few seconds so the thread
       # can check if the process is shutting down.
       TIMEOUT = 2
 
-      UnitOfWork = Struct.new(:queue, :job, :prioritized) {
+      UnitOfWork = Struct.new(:queue, :job, :config, :prioritized) {
         def acknowledge
           # nothing to do
         end
@@ -15,69 +19,69 @@ module Sidekiq
         end
 
         def requeue
-          Sidekiq.redis do |conn|
+          config.redis do |conn|
             prioritized ? conn.zadd(queue, 0, job) : conn.rpush(queue, job)
           end
         end
       }
 
-      def initialize(options)
-        raise ArgumentError, "missing queue list" unless options[:queues]
-        @strictly_ordered_queues = !!options[:strict]
-        @queues = options[:queues].map { |q| "queue:#{q}" }
+      def initialize(capsule)
+        raise ArgumentError, "missing queue list" unless capsule.queues
+
+        @config = capsule
+        @strictly_ordered_queues = capsule.mode == :strict
+        @queues = capsule.queues.map { |q| "queue:#{q}" }
 
         # Non prioritized queues use list-based Redis push/pop
         @non_prioritized_queues =
-          (options[:non_prioritized_queues] || Sidekiq[:non_prioritized_queues] || [])
-            .map { |q| "queue:#{q}" }
+          (capsule[:non_prioritized_queues] || []).map { |q| "queue:#{q}" }
 
-        if @strictly_ordered_queues
-          @queues.uniq!
-          @queues << TIMEOUT
-        end
+        @queues.uniq! if @strictly_ordered_queues
       end
 
       def retrieve_work
         work = nil
 
-        Sidekiq.redis do |conn|
-          queues.each do |queue|
+        redis do |conn|
+          queues_cmd.each do |queue|
             if zset?(queue)
-              response = conn.multi do |pipeline|
-                pipeline.zrange(queue, 0, 0)
-                pipeline.zremrangebyrank(queue, 0, 0)
-              end.flatten(1)
+              response = conn.multi { |transaction|
+                transaction.zrange(queue, 0, 0)
+                transaction.zremrangebyrank(queue, 0, 0)
+              }.flatten(1)
               next if response.length == 1
 
-              work = [queue, response.first, true]
+              work = [queue, response.first, config, true]
               break
             else
               job = conn.rpop(queue)
-              work = [queue, job, false] if job
+              work = [queue, job, config, false] if job
               break if work
             end
           end
         end
 
         return UnitOfWork.new(*work) if work
-        sleep TIMEOUT; nil
+
+        sleep TIMEOUT
+        nil
       end
 
-      def queues
+      def queues_cmd
         @strictly_ordered_queues ? @queues.dup : @queues.shuffle.uniq
       end
 
-      def bulk_requeue(inprogress, options)
+      def bulk_requeue(inprogress)
         return if inprogress.empty?
 
-        Sidekiq.logger.debug { "Re-queueing terminated jobs" }
+        logger.debug { "Re-queueing terminated jobs" }
         jobs_to_requeue = {}
         inprogress.each do |unit_of_work|
           jobs_to_requeue[unit_of_work.queue] ||= []
           jobs_to_requeue[unit_of_work.queue] << unit_of_work.job
         end
 
-        Sidekiq.redis do |conn|
+        redis do |conn|
           conn.pipelined do |pipeline|
             jobs_to_requeue.each do |queue, jobs|
               jobs.each do |job|
@@ -91,7 +95,7 @@ module Sidekiq
           end
         end
       rescue => ex
-        Sidekiq.logger.warn("Failed to requeue #{inprogress.size} jobs: #{ex.message}")
+        logger.warn("Failed to requeue #{inprogress.size} jobs: #{ex.message}")
       end
 
       private

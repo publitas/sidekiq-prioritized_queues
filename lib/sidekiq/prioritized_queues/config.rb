@@ -2,6 +2,11 @@ require 'yaml'
 
 module Sidekiq
   module PrioritizedQueues
+    # Sidekiq 7 removed the module-level Sidekiq[] accessor.
+    def self.prioritized_queue?(name)
+      !(Sidekiq.default_configuration[:non_prioritized_queues] || []).include?(name)
+    end
+
     class Config
       attr_reader :config
 

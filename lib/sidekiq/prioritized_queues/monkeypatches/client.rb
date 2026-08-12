@@ -6,29 +6,31 @@ module Sidekiq
 
     def atomic_push(conn, payloads)
       if payloads.first.key?('at')
-        conn.zadd('schedule', payloads.map do |hash|
-          at = hash.delete('at').to_s
+        conn.zadd('schedule', payloads.flat_map do |hash|
+          at = hash['at'].to_s
+          hash.delete('enqueued_at')
+          hash = hash.dup
+          hash.delete('at')
           [at, Sidekiq.dump_json(hash)]
         end)
       else
-        non_prioritized_queues = Sidekiq[:non_prioritized_queues] || []
         queue = payloads.first['queue']
         now = Time.now.to_f
-        conn.sadd?('queues', queue)
+        conn.sadd('queues', [queue])
 
-        if non_prioritized_queues.include?(queue)
-          to_push = payloads.map { |entry|
-            entry['enqueued_at'] = now
-            Sidekiq.dump_json(entry)
-          }
-          conn.lpush("queue:#{queue}", to_push)
-        else
+        if Sidekiq::PrioritizedQueues.prioritized_queue?(queue)
           payloads.each do |entry|
             entry['enqueued_at'] = now
             to_push  = Sidekiq.dump_json(entry)
             priority = entry['priority'] || 0
             conn.zadd("queue:#{queue}", priority, to_push)
           end
+        else
+          to_push = payloads.map { |entry|
+            entry['enqueued_at'] = now
+            Sidekiq.dump_json(entry)
+          }
+          conn.lpush("queue:#{queue}", to_push)
         end
       end
     end
