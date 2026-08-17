@@ -1,29 +1,55 @@
 # frozen_string_literal: true
 
+# Sidekiq 7 loads sidekiq/api lazily; without this the patches below are
+# defined first and then silently overwritten by the stock definitions.
+require 'sidekiq/api'
+
 module Sidekiq
   class Stats
+    def queues
+      Sidekiq.redis do |conn|
+        queues = conn.sscan('queues').to_a
+
+        lengths = conn.pipelined { |pipeline|
+          queues.each do |queue|
+            if Sidekiq::PrioritizedQueues.prioritized_queue?(queue)
+              pipeline.zcard("queue:#{queue}")
+            else
+              pipeline.llen("queue:#{queue}")
+            end
+          end
+        }
+
+        array_of_arrays = queues.zip(lengths).sort_by { |_, size| -size }
+        array_of_arrays.to_h
+      end
+    end
 
     def fetch_stats_fast!
+      default_prioritized = Sidekiq::PrioritizedQueues.prioritized_queue?('default')
+
       pipe1_res = Sidekiq.redis do |conn|
-        conn.pipelined do
-          conn.get('stat:processed')
-          conn.get('stat:failed')
-          conn.zcard('schedule')
-          conn.zcard('retry')
-          conn.zcard('dead')
-          conn.scard('processes')
-          begin
-            conn.zrange('queue:default', -1, -1)
-          rescue Redis::CommandError
-            # If default queue is ignored, zrange will raise a command error
-            conn.lrange("queue:default", -1, -1)
+        conn.pipelined do |pipeline|
+          pipeline.get('stat:processed')
+          pipeline.get('stat:failed')
+          pipeline.zcard('schedule')
+          pipeline.zcard('retry')
+          pipeline.zcard('dead')
+          pipeline.scard('processes')
+          if default_prioritized
+            pipeline.zrange('queue:default', 0, 0)
+          else
+            pipeline.lindex('queue:default', -1)
           end
         end
       end
 
-      default_queue_latency = if (entry = pipe1_res[6].first)
+      oldest = pipe1_res[6]
+      oldest = oldest.first if oldest.is_a?(Array)
+
+      default_queue_latency = if oldest
         job = begin
-          Sidekiq.load_json(entry)
+          Sidekiq.load_json(oldest)
         rescue
           {}
         end
@@ -33,6 +59,7 @@ module Sidekiq
       else
         0
       end
+
       @stats = {
         processed: pipe1_res[0].to_i,
         failed: pipe1_res[1].to_i,
@@ -47,23 +74,21 @@ module Sidekiq
 
     def fetch_stats_slow!
       processes = Sidekiq.redis do |conn|
-        conn.sscan_each('processes').to_a
+        conn.sscan('processes').to_a
       end
 
       queues = Sidekiq.redis do |conn|
-        conn.sscan_each('queues').to_a
+        conn.sscan('queues').to_a
       end
 
-      non_prioritized_queues = Sidekiq[:non_prioritized_queues] || []
-
       pipe2_res = Sidekiq.redis do |conn|
-        conn.pipelined do
-          processes.each { |key| conn.hget(key, 'busy') }
+        conn.pipelined do |pipeline|
+          processes.each { |key| pipeline.hget(key, 'busy') }
           queues.each do |queue|
-            if non_prioritized_queues.include?(queue)
-              conn.llen("queue:#{queue}")
+            if Sidekiq::PrioritizedQueues.prioritized_queue?(queue)
+              pipeline.zcard("queue:#{queue}")
             else
-              conn.zcard("queue:#{queue}")
+              pipeline.llen("queue:#{queue}")
             end
           end
         end
@@ -71,57 +96,31 @@ module Sidekiq
 
       s = processes.size
       workers_size = pipe2_res[0...s].sum(&:to_i)
-      enqueued = pipe2_res[s..-1].sum(&:to_i)
+      enqueued = pipe2_res[s..].sum(&:to_i)
 
       @stats[:workers_size] = workers_size
       @stats[:enqueued] = enqueued
       @stats
-    end
-
-    class Queues
-      def lengths
-        non_prioritized_queues = Sidekiq[:non_prioritized_queues] || []
-
-        Sidekiq.redis do |conn|
-          queues = conn.sscan_each('queues').to_a
-
-          lengths = conn.pipelined {
-            queues.each do |queue|
-              if non_prioritized_queues.include?(queue)
-                conn.llen("queue:#{queue}")
-              else
-                conn.zcard("queue:#{queue}")
-              end
-            end
-          }
-
-          array_of_arrays = queues.zip(lengths).sort_by { |_, size| -size }
-          array_of_arrays.to_h
-        end
-      end
     end
   end
 
   class Queue
     def size
       Sidekiq.redis do |conn|
-        if prioritized?
-          conn.zcard(@rname)
-        else
-          conn.llen(@rname)
-        end
+        prioritized? ? conn.zcard(@rname) : conn.llen(@rname)
       end
     end
 
     def latency
       entry = Sidekiq.redis do |conn|
         if prioritized?
-          conn.zrange(@rname, -1, -1)
+          conn.zrange(@rname, 0, 0)
         else
           conn.lrange(@rname, -1, -1)
         end
       end.first
       return 0 unless entry
+
       job = Sidekiq.load_json(entry)
       now = Time.now.to_f
       thence = job['enqueued_at'] || now
@@ -139,12 +138,13 @@ module Sidekiq
         range_end = range_start + page_size - 1
         entries = Sidekiq.redis do |conn|
           if prioritized?
-            conn.zrevrange(@rname, range_start, range_end)
+            conn.zrange(@rname, range_start, range_end, 'REV')
           else
             conn.lrange(@rname, range_start, range_end)
           end
         end
         break if entries.empty?
+
         page += 1
         entries.each do |entry|
           yield JobRecord.new(entry, @name)
@@ -155,14 +155,9 @@ module Sidekiq
 
     def clear
       Sidekiq.redis do |conn|
-        conn.multi do
-          conn.unlink(@rname)
-
-          if prioritized?
-            conn.zrem('queues', name)
-          else
-            conn.srem('queues', [name])
-          end
+        conn.multi do |transaction|
+          transaction.unlink(@rname)
+          transaction.srem('queues', [name])
         end
       end
     end
@@ -170,7 +165,9 @@ module Sidekiq
     private
 
     def prioritized?
-      @prioritized ||= !(Sidekiq[:non_prioritized_queues] || []).include?(name)
+      return @prioritized unless @prioritized.nil?
+
+      @prioritized = Sidekiq::PrioritizedQueues.prioritized_queue?(name)
     end
   end
 
@@ -189,7 +186,9 @@ module Sidekiq
     private
 
     def prioritized?
-      @prioritized ||= !(Sidekiq[:non_prioritized_queues] || []).include?(@queue)
+      return @prioritized unless @prioritized.nil?
+
+      @prioritized = Sidekiq::PrioritizedQueues.prioritized_queue?(@queue)
     end
   end
 end

@@ -11,6 +11,18 @@ This gem also adds a new priority based Fetcher, and a middleware that sets prio
 
 **WARNING: This changes the type of the `queue:<name>` keys. There's no migration helper in place, so the easiest way is to start off with a clean setup.**
 
+## Compatibility
+
+| Gem     | Sidekiq  |
+| ------- | -------- |
+| `0.3.x` | `>= 7.3.3`, `< 8` |
+| `0.2.x` | `>= 6.2.2`, `< 7` |
+
+Sidekiq 7 moved the fetcher onto the capsule, so `0.3.0` registers itself via
+`config[:fetch_class]` and receives a `Sidekiq::Capsule` rather than an options
+hash. Queue ordering is taken from `capsule.mode`, which Sidekiq infers from the
+queue weights — the `:strict` key in `sidekiq.yml` no longer exists.
+
 ## Installation
 
 Add this line to your application's Gemfile:
